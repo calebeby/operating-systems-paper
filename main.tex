@@ -1,0 +1,92 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{textcomp}
+\usepackage{xcolor}
+\begin{document}
+
+\title{\color{red}Blah Blah Blah}
+
+\author{\IEEEauthorblockN{Caleb Eby}
+	\IEEEauthorblockA{\textit{Computer Science Department} \\
+		\textit{Whitworth University}\\
+		Spokane, WA, USA \\
+		ceby23@my.whitworth.edu}
+}
+
+\maketitle
+
+\begin{abstract}
+	\color{red} Blah Blah Blah
+\end{abstract}
+
+\begin{IEEEkeywords}
+	\color{red} Blah
+\end{IEEEkeywords}
+
+\section{Introduction}
+Dynamic memory, memory that a program needs at runtime but that doesn't have a fixed size at compile time, is very commonly used in software.
+However, the process of finding a location in memory to place blocks of dynamic memory is a challenging problem with significant trade-offs.
+Generally, dynamic memory allocators (referred to as \emph{heap allocators}) must choose some balance of maximizing allocation/deallocation performance, maximizing the likelihood of catching invalid memory accesses, minimizing memory usage overhead, and minimizing unused space.
+
+	{\color{red}...describe outline of paper/goals}
+
+\section{Traditional Allocator Designs}
+
+\subsection{Bump Allocator}
+
+The most simple heap allocation strategy is a bump allocator.
+Bump allocators hold a pointer to the next unused memory address in a block of memory.
+Whenever a new allocation is requested, the allocator returns the address stored in the bump pointer, and increments the bump pointer by the requested size.
+The most trivial bump allocators do not reuse deallocated memory: allocated memory remains in place until the program exits, when all of the program's memory is returned to the operating system.
+This allocation approach is simple to implement and has very good performance, but the lack of memory reuse makes it impractical except in applications with a short run-time or with limited use of dynamic memory.
+
+\subsection{Doug Lea's Allocator}
+By modifying this approach, we can make a practical, performance-oriented allocator which supports memory reuse.
+Doug Lea's Allocator (\emph{dlmalloc}) is a memory allocator implemented by Doug Lea in 1987, which has since then been continually modified and used as a reference for many allocator designs, including the default allocator used in Linux.
+
+When memory is deallocated, dlmalloc stores a pointer to that memory in a \emph{freelist}.
+A \emph{freelist} is an array or linked list that stores pointers to available memory.
+In dlmalloc, a separate freelist is created for each size class (16 bytes, 24 bytes, 32 bytes, etc.) of freed memory.
+When memory is freed, its pointer is added to the freelist corresponding to its size class (or rounded up to the nearest size class).
+If newly freed memory is adjacent to already-free memory, the free chunks will be merged into one larger free chunk.
+\emph{Boundary tags} contain size and status information and are stored on the ends of each chunk, which allow dlmalloc to detect and merge adjacent free memory.
+
+To allocate memory, dlmalloc checks the freelist corresponding to the smallest size class that is at least the requested size.
+If the freelist is not empty, the first pointer will be removed from the freelist and returned.
+If the freelist is empty, dlmalloc checks each of the larger size classes until it finds available memory.
+In that case, the chunk of memory may be much larger than what was requested, so dlmalloc will split the chunk into one chunk of the requested size, and another chunk containing the rest.
+The leftover chunk will then be added to the corresponding freelist.
+
+If no larger freelists contain free memory to reuse, more memory will be made available by incrementing the bump pointer in the same way simple bump allocators do.
+
+Doug Lea's allocator was used as the basis for the Linux allocator, and a similar approach is used on Windows.
+The simplicity, minimal performance overhead, and determinism make it an appealing approach.
+However, it is exploitable because of its determinism in memory placement and its use of metadata stored in boundary tags.
+
+	{\color{red} Source for this section: Doug Lea's "A Memory Allocator" }
+
+\section{Heap Allocator Vulnerabilities}
+ {\color{red}...}
+
+\section{Secure Allocators}
+ {\color{red}...}
+
+\subsection{Secure Allocator Design}
+{\color{red}...}
+
+\subsection{Performance Overhead Improvements for Secure Allocators}
+{\color{red}...}
+
+\subsection{Memory Overhead Improvements for Secure Allocators}
+{\color{red}...}
+
+\section{Comparison of Allocator Features, Security, and Approaches}
+ {\color{red}...}
+
+\section{Conclusion}
+ {\color{red}...}
+
+\end{document}
