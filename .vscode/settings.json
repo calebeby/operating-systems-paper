@@ -2,8 +2,12 @@
     "cSpell.words": [
         "deallocated",
         "deallocation",
+        "deallocations",
         "dlmalloc",
         "freelist",
+        "freelists",
+        "heartbleed",
+        "malloc",
         "Whitworth"
     ]
 }

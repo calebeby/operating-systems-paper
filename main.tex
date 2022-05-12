@@ -34,7 +34,9 @@ Dynamic memory, memory that a program needs at runtime but that doesn't have a f
 However, the process of finding a location in memory to place blocks of dynamic memory is a challenging problem with significant trade-offs.
 Generally, dynamic memory allocators (referred to as \emph{heap allocators}) must choose some balance of maximizing allocation/deallocation performance, maximizing the likelihood of catching invalid memory accesses, minimizing memory usage overhead, and minimizing unused space.
 
-	{\color{red}...describe outline of paper/goals}
+	{\color{red}...more on why allocators are important}
+
+	{\color{red}...describe outline of paper/goals, brief overview of different allocators and their priorities}
 
 \section{Traditional Allocator Designs}
 
@@ -48,7 +50,7 @@ This allocation approach is simple to implement and has very good performance, b
 
 \subsection{Doug Lea's Allocator}
 By modifying this approach, we can make a practical, performance-oriented allocator which supports memory reuse.
-Doug Lea's Allocator (\emph{dlmalloc}) is a memory allocator implemented by Doug Lea in 1987, which has since then been continually modified and used as a reference for many allocator designs, including the default allocator used in Linux.
+Doug Lea's Allocator (\emph{dlmalloc}) is a memory allocator implemented by Doug Lea in 1987, which has since then been continually modified and used as a reference for many allocator designs, including the default implementation of \verb|malloc| in glibc and in Linux.
 
 When memory is deallocated, dlmalloc stores a pointer to that memory in a \emph{freelist}.
 A \emph{freelist} is an array or linked list that stores pointers to available memory.
@@ -65,17 +67,61 @@ The leftover chunk will then be added to the corresponding freelist.
 
 If no larger freelists contain free memory to reuse, more memory will be made available by incrementing the bump pointer in the same way simple bump allocators do.
 
-Doug Lea's allocator was used as the basis for the Linux allocator, and a similar approach is used on Windows.
-The simplicity, minimal performance overhead, and determinism make it an appealing approach.
+The simplicity, minimal performance overhead, and determinism make it an appealing approach, which is why it was used as the basis for \verb|malloc| in glibc and in Linux.
 However, it is exploitable because of its determinism in memory placement and its use of metadata stored in boundary tags.
 
 	{\color{red} Source for this section: Doug Lea's "A Memory Allocator" }
 
 \section{Heap Allocator Vulnerabilities}
- {\color{red}...}
+
+The approaches used by bump allocators and dlmalloc are relatively simple, but they are very vulnerable to security breaches, including code gaining access to memory it should not have access to, which can lead to control flow hijacking and information leakage.
+While operating systems include protections to ensure processes can only access memory they have permission to, operating systems do not have protections for memory access \emph{within} a process.
+This leaves the door open for attackers to target specific programs based on knowledge of how their allocators function.
+We will cover several of the most common ways attackers exploit allocators.
+
+\subsection{Heap Buffer Overflows}
+The most common heap-related attacks are caused by \emph{heap buffer overflows}, when a process accesses memory beyond the ends of an allocated object.
+
+	{\color{red} Cite: guarder table of heap vulnerabilities in 2017 }
+
+	{\color{red} Example: heartbleed over-read (cite: guarder) }
+
+A common example of a heap buffer overflow is an \emph{off by one error}, which is when a program increments or decrements an index one too many times.
+This leads to memory being read from or written to outside of the boundary of a heap-allocated object.
+
+Heap buffer overflows can also happen when programs neglect to implement correct bound checking, and memory is written to without making sure that it does not exceed the size of its container.
+If an attacker has control over the data that is being saved to memory, they can strategically craft the data to make the program deviate from its intended functionality.
+
+In an allocator like dlmalloc, heap buffer overflows can be exploited to read or write data to neighboring objects.
+Because of the determinism of the memory placement in dlmalloc, attackers can sometimes predict the relative memory addresses of different objects in a program, allowing them to read data and leak information that they should not have access to.
+Also, since dlmalloc stores metadata in boundary tags on the ends of each allocated chunk, attackers can use buffer overflows to change the free/used bit or the next chunk/previous chunk pointers that are stored in boundary tags.
+By overriding this metadata, attackers can change the functionality of the chunk-coalescing algorithm to cause it to write arbitrary data to arbitrary locations within the program's memory.
+This can, among other things, be used to override pointers to code to hijack the control flow of the program.
+
+	{\color{red} cite: Security of memory allocators for C and C++ }
+
+\subsection{Use-After-Free, Double Free, and Invalid Free}
+
+Another common heap-related vulnerability is \emph{use-after-free} bugs.
+Use-after-free occurs when memory that has been deallocated continues to be referenced and accessed by programs.
+The pointers that reference deallocated memory are called \emph{dangling pointers}.
+
+Attackers can take advantage of code containing use-after-free bugs by replacing the data stored in that memory, changing the behavior of the program.
+With deterministic allocators like dlmalloc, attackers can predict when a new allocation will use the same memory that was previously freed, and use that to override the data stored that is still being referenced by the program.
+Like buffer overflows, this can result in information leakage or control flow hijacking, depending on how the dangling pointers are used.
+
+A more specific case of use-after-free bugs is \emph{double-free} bugs, where memory that was deallocated continues to be referenced, and later is deallocated again.
+Some allocators, such as dlmalloc, do not have ways of ensuring that the deallocation function is only called on allocated memory.
+Because of this, when memory is freed twice using dlmalloc, it will override the next/previous pointers in the boundary tags in a way that allows attackers to hijack the control flow in a similar way as with heap buffer overflows.
+
+	{\color{red} cite: Security of memory allocators for C and C++ }
+
+An \emph{invalid free} bug occurs when memory is deallocated that was not allocated.
+It can be exploited in similar ways as double-free bugs while using allocators which do not check for the validity of \verb|free| requests.
+
+	{\color{red} TODO: prevalence of heap vulnerabilities (either here or in intro) }
 
 \section{Secure Allocators}
- {\color{red}...}
 
 \subsection{Secure Allocator Design}
 {\color{red}...}
