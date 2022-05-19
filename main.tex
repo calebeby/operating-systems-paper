@@ -14,11 +14,10 @@
 
 \begin{document}
 
-\title{Heap Allocator Strategies for Security and Performance}
+\title{Heap Allocator Strategies for Security~and~Performance}
 
 \author{\IEEEauthorblockN{Caleb Eby}
-	\IEEEauthorblockA{\textit{Computer Science Department} \\
-		\textit{Whitworth University}\\
+	\IEEEauthorblockA{Whitworth University\\
 		Spokane, WA, USA \\
 		ceby23@my.whitworth.edu}
 }
@@ -26,19 +25,26 @@
 \maketitle
 
 \begin{abstract}
-	\color{red} TODO: Abstract abstract abstract abstract
+	Heap-based attacks are an increasingly common way for attackers to gain access to computer systems.
+	Secure heap allocators can minimize the attack surface of heap memory and increase the likelihood of catching vulnerability-causing bugs.
+	In this paper, we explore different strategies of increasing security in heap allocators and how different strategies affect performance and memory overhead.
+	We evaluate the functionality of several security-focused heap allocators and how they achieve good performance while drastically improving security compared to common, non-secure allocators.
 \end{abstract}
 
 \section{Introduction}
-Dynamic memory, memory that a program needs at runtime but that doesn't have a fixed size at compile time, is very commonly used in software.
+In modern software, a commonly used feature of programming languages is \emph{dynamic memory}, memory that a program needs at runtime but that doesn't have a fixed size at compile time.
 However, the process of finding a location in memory to place blocks of dynamic memory is a challenging problem with significant trade-offs.
-Generally, dynamic memory allocators (referred to as \emph{heap allocators}) must choose some balance of maximizing allocation/deallocation performance, maximizing the likelihood of catching invalid memory accesses, minimizing memory usage overhead, and minimizing unused space.
+Generally, dynamic memory allocators (referred to as \emph{heap allocators}) must choose some balance of maximizing allocation/deallocation performance, maximizing the likelihood of catching invalid or malicious memory accesses, and minimizing memory usage overhead.
 
-	{\color{red}...more on why allocators are important}
+The layout of heap-allocated memory has frequently been taken advantage of by attackers recently.
+Over 1100 heap-related attacks were reported to the National Vulnerability Database in 2017 \cite{guarder}.
+Notably, in 2014, the Heartbleed bug was publicly disclosed, revealing that the OpenSSL library, a widely used encryption library, had a buffer overflow bug which allowed attackers to access private data intended to be protected by encryption.
 
-	{\color{red}...describe outline of paper/goals, brief overview of different allocators and their priorities}
-
-	{\color{red} TODO: Somewhere, I should describe the \verb|mmap| system call but I don't know where.}
+In order to prevent bugs that leave libraries and applications vulnerable to this kind of attack, researchers have developed secure allocators, which help detect memory access bugs.
+This paper provides an overview of traditional allocators and their vulnerabilities, and how secure allocators solve those vulnerabilities.
+In the first section, we will explore traditional allocator designs.
+Then, we will go over the most common ways that heap memory is exploited.
+Then, we'll cover the OpenBSD allocator's approach to security, before going into FreeGuard, Guarder, and SlimGuard, allocators which improve security while minimizing the performance and memory cost paid for that security.
 
 \section{Traditional Allocator Designs}
 
@@ -51,7 +57,7 @@ The most trivial bump allocators do not reuse deallocated memory: allocated memo
 This allocation approach is simple to implement and has very good performance, but the lack of memory reuse makes it impractical except in applications with a short run-time or with limited use of dynamic memory.
 
 \subsection{Doug Lea's Allocator}
-By modifying this approach, we can make a practical, performance-oriented allocator which supports memory reuse.
+By modifying this approach, we can make a practical, performance-oriented allocator which supports memory reuse \cite{dlmalloc}.
 Doug Lea's Allocator (\emph{dlmalloc}) is a memory allocator implemented by Doug Lea in 1987, which has since then been continually modified and used as a reference for many allocator designs, including the default implementation of \verb|malloc| in glibc and in Linux.
 
 When memory is deallocated, dlmalloc stores a pointer to that memory in a \emph{freelist}.
@@ -72,8 +78,6 @@ If no larger freelists contain free memory to reuse, more memory will be made av
 The simplicity, minimal performance overhead, and determinism make it an appealing approach, which is why it was used as the basis for \verb|malloc| in glibc and in Linux.
 However, it is exploitable because of its determinism in memory placement and its use of metadata stored in boundary tags.
 
-	{\color{red} Source for this section: Doug Lea's "A Memory Allocator" }
-
 \section{Heap Allocator Vulnerabilities}
 
 The approaches used by bump allocators and dlmalloc are relatively simple, but they are very vulnerable to security breaches, including code gaining access to memory it should not have access to, which can lead to control flow hijacking and information leakage.
@@ -83,10 +87,6 @@ We will cover several of the most common ways attackers exploit allocators.
 
 \subsection{Heap Buffer Overflows}
 The most common heap-related attacks are caused by \emph{heap buffer overflows}, when a process accesses memory beyond the ends of an allocated object.
-
-	{\color{red} Reference: guarder table of heap vulnerabilities in 2017 }
-
-	{\color{red} Example: heartbleed over-read (cite: guarder) }
 
 A common example of a heap buffer overflow is an \emph{off by one error}, which is when a program increments or decrements an index one too many times.
 This leads to memory being read from or written to outside of the boundary of a heap-allocated object.
@@ -100,7 +100,7 @@ Also, since dlmalloc stores metadata in boundary tags on the ends of each alloca
 By overriding this metadata, attackers can change the functionality of the chunk-coalescing algorithm to cause it to write arbitrary data to arbitrary locations within the program's memory.
 This can, among other things, be used to override pointers to code to hijack the control flow of the program \cite{security_mem_cpp}.
 
-\subsection{Use-After-Free, Double Free, and Invalid Free}
+\subsection{Use-After-Free, Double-Free, and Invalid Free}
 
 Another common heap-related vulnerability is \emph{use-after-free} bugs.
 Use-after-free occurs when memory that has been deallocated continues to be referenced and accessed by programs.
@@ -117,8 +117,6 @@ Because of this, when memory is freed twice using dlmalloc, it will override the
 An \emph{invalid free} bug occurs when memory is deallocated that was not allocated.
 It can be exploited in similar ways as double-free bugs while using allocators which do not check for the validity of \verb|free| requests \cite{freeguard}.
 
-{\color{red} TODO: prevalence of heap vulnerabilities (either here or in intro) }
-
 \section{Secure Allocators}
 
 The kinds of memory access bugs described are easy-to-make errors that are also elusive because programs will often continue to function even with the bugs in place.
@@ -129,12 +127,17 @@ This goal has led to the creation of several secure allocators, which are design
 
 \subsection{Secure Allocator Design: The OpenBSD Allocator}
 
+\subsubsection{Separating Metadata}
+
 The most straightforward way to improve allocator security compared to an allocator like dlmalloc is to store chunk metadata separately from the data itself.
 If the metadata location is only known by the allocator and not by the program itself, the attack surface for potential allocator breaches is minimized because attackers cannot modify the metadata to change the allocator's functionality.
+Also, when \verb|free| is called, the separated metadata can be checked to determine if it is a valid address to free, preventing double-free or invalid free attacks.
 
 Another way to minimize security vulnerabilities is to randomize the location of allocated objects across the program's available address space.
 This prevents attackers from knowing the relative locations of different blocks of a program's memory, which makes it much harder for attackers to read or write to specific program data.
 However, randomizing memory placement increases \emph{fragmentation}, which is when the spaces between allocated memory blocks remain largely unused because of their size.
+
+\subsubsection{The BIBOP Approach}
 
 Modern secure allocators solve these problems by introducing a different allocation approach: ``Big Bag of Pages'' (BIBOP).
 \emph{BIBOP-style allocators} have a set of \emph{size classes} (similar to dlmalloc).
@@ -142,65 +145,244 @@ The allocator creates a set of \emph{bags}, each being a segment of memory set a
 When an allocation occurs, the allocator finds an appropriate bag given the requested size (using metadata stored separately from the bags), and then chooses a free space within the bag to allocate.
 The use of bags based on size classes allows the allocator to randomize the placement of objects within a bag, while preventing significant fragmentation.
 
+\subsubsection{Randomized Allocation}
+
+\begin{figure}
+	\def\svgwidth{3.5in}
+	\input{openbsd_allocation.pdf_tex}
+	\caption{
+		OpenBSD's allocation strategy.
+		One of the bags for a given size class (listed in the bag list for that size class) is randomly chosen.
+		A random free position in the bag is chosen based on the corresponding state bitmap.
+		\label{fig:openbsd_allocation}}
+\end{figure}
+
 The OpenBSD allocator is an implementation of the BIBOP style of allocator.
 It stores a bitmap for each bag, where each bit represents the free/in-use status of each object slot in the bag.
 To allocate memory, the allocator repeatedly chooses a random location in a bag of the correct size class, and uses the bitmap to check whether it is free, until it finds a free slot.
 Then the bitmap is modified to mark the slot as in-use and the address is returned \cite{freeguard}.
 
-The OpenBSD allocator introduces another layer of randomization: there are at least four bags corresponding to each size class, and each allocation involves randomly selecting one of those bags.
+The OpenBSD allocator introduces another layer of randomization: there are at least four bags corresponding to each size class, and each allocation involves randomly selecting one of those bags (shown in Fig.~\ref{fig:openbsd_allocation}).
 The \emph{bag list} maintains pointers to each bag of a size class, and when one of the bags becomes full, a new one is created to maintain randomization \cite{freeguard}.
 
 The allocation randomization provides protection against use-after-free and buffer overflow attacks by making it more challenging for attackers to predict the locations of specific objects.
 However, use-after-free bugs and buffer overflows can still go undetected, making it more challenging but still possible for attackers to take advantage of them.
 
+\subsubsection{Canaries}
 The OpenBSD allocator is able to catch most buffer overflows by using \emph{canaries}.
 Canaries are one-byte values attached to the end of allocated objects, with a known value written during allocation.
 When the memory is freed, the deallocation function checks that the canary value was not changed, and if it was, the program is aborted \cite{openbsd_man_page}.
 Canaries can protect against buffer overflows, as long as attackers cannot determine the canary value and location.
 But they do not protect against \emph{reading} past the boundary of an object.
 
+\subsubsection{Guard Pages}
 For more protection against buffer overflows, including over-reads, the OpenBSD allocator includes \emph{guard pages} \cite{openbsd_man_page}.
 Guard pages are blocks of memory which, when accessed by reading or writing, will cause a segfault.
 Allocators insert guard pages between pages of data in bags so that overflows have some likelihood of running into the guard pages, triggering a segfault.
 Since the allocator only can intercept allocations and deallocations, the guard page access enforcement is performed by the operating system.
-The OpenBSD allocator creates guard pages by calling the \verb|mmap| system call, setting the address range as unmapped.
-	{\color{red} TODO: connect this to the mmap definition used later, or reorder so the definition comes first}
+The OpenBSD allocator creates guard pages by calling the \verb|mmap| system call, setting the address range as unmapped (described in more detail later).
 Since it is unmapped, the guard pages do not take up physical memory; they just use some of the virtual address space, which, on 64-bit machines, is much larger than needed anyways.
+When they are accessed, the operating system will exit the program with a segfault.
 
+\subsubsection{Delayed Reuse}
 To protect against use-after-free bugs, the OpenBSD allocator does not actually deallocate objects when \verb|free| is called.
 Instead, their addresses are placed into a \emph{delayed array}, where they stay for a random number of allocations before they are truly deallocated \cite{freeguard}.
 This makes memory reuse unpredictable, making it much harder for attackers to override reused addresses in ways that affect the program's execution.
+Mitigating use-after-free attacks in this way is called \emph{delayed reuse}.
 
+\subsubsection{Handling Large Allocations}
 For allocations larger than 2 KB, the OpenBSD allocator uses a different approach: it uses the \verb|mmap| system call.
 The \verb|mmap| system call is a Linux function that requests that the kernel allocates additional virtual memory outside the address space of the process. \cite{mmap_man_page}
 Memory allocated by \verb|mmap| is fully isolated from the process's main address space---because of the vast 64-bit address space, the operating system can choose to place the new address range anywhere outside the main address range.
 The operating system will also protect against buffer overflows that cross the boundary of a region allocated by \verb|mmap|.
-Memory ranges allocated by \verb|mmap| are added to the allowed memory ranges that the process is allowed to access, but buffer overruns that land outside the \verb|mmap|ed range will cause a segmentation fault.
+Memory ranges allocated by \verb|mmap| are added to the allowed memory ranges that the process is allowed to access, but buffer overflows that land outside the \verb|mmap|ed range will cause a segmentation fault.
 
-The memory isolation and protection that \verb|mmap| provides seems ideal: it protects both against overruns and against use-after-free.
+The memory isolation and protection that \verb|mmap| provides seems ideal: it protects both against overflows and against use-after-free.
 So why does the OpenBSD allocator only use it for allocations larger than 2 KB?
 The problem with \verb|mmap| is that it is slow to execute.
 Because it is a system call, it requires that the processor switches to the kernel state, makes the necessary changes to the page table, and switches back to the original process.
 
 The system call overhead accounts for a significant part of the time that the OpenBSD allocator spends on average to allocate memory \cite{guarder}, which is why it does not use \verb|mmap| for objects smaller than 2 KB, which are allocated and deallocated more frequently.
-Also, OpenBSD caches up to 64 pages from \verb|mmap| \cite{freeguard} to reduce \verb|mmap| calls (while giving up some protection against use-after-free vulnerabilities).
+Also, it caches up to 64 pages from \verb|mmap| \cite{freeguard} to reduce \verb|mmap| calls (while giving up some protection against use-after-free vulnerabilities).
 
 OpenBSD's approach to memory allocation provides protection against buffer overflows, use-after-frees, while also making attacks much more complicated because of its randomization and separation of metadata.
 Because of these protections, it is much more secure than dlmalloc or the glibc allocator.
-However, OpenBSD's allocator incurred a 31\% overhead compared to the baseline performance of the glibc allocator.
+However, OpenBSD's allocator incurred a 31\% overhead compared to the baseline performance of the glibc allocator \cite{guarder}.
 In the upcoming sections we will explore allocation approaches that are able to nearly match the glibc allocator's performance while providing even more protections than the OpenBSD allocator.
 
 \subsection{Performance Overhead Improvements for Secure Allocators: FreeGuard and Guarder}
-{\color{red}...}
+
+
+\emph{FreeGuard} is a new allocator designed to solve the performance problems of existing secure allocators, while maintaining security.
+FreeGuard has a 1\% performance overhead compared to the glibc allocator \cite{guarder}.
+This is significantly better than the OpenBSD allocator, and it allows programs currently using an insecure allocator to switch to a secure allocator with minimal performance impact.
+
+FreeGuard, like the OpenBSD allocator, uses a BIBOP approach, meaning that free space is organized by size classes in bags.
+To reduce calls to \verb|mmap|, FreeGuard allocates one large memory segment with \verb|mmap| upfront and places bags within it, rather than calling \verb|mmap| for each bag individually as the OpenBSD allocator does.
+
+\subsubsection{FreeGuard's Allocation Approach}
+
+\begin{figure}
+	\def\svgwidth{3.5in}
+	\input{freeguard_allocation.pdf_tex}
+	\caption{
+		FreeGuard's allocation strategy.
+		During allocation, one-of-four freelists is selected, and the first address in that freelist is returned.
+		To deallocate memory, the address is added to the end of one-of-four freelists.
+		\label{fig:freeguard_allocation}}
+\end{figure}
+
+One way FreeGuard improves performance compared to the OpenBSD allocator is in how it selects randomized placements within a bag.
+Since OpenBSD's allocator stores the free/available state of each slot using a bitmap, its approach of repeatedly choosing a random index and checking if it is free can take up a significant amount of time.
+FreeGuard instead uses \emph{freelists}, lists of available slots to reuse (similar to dlmalloc).
+This makes selecting free memory within a bag a constant-time process.
+Each bag has four freelists corresponding to it.
+To allocate memory within a bag, one of the four freelists is randomly chosen, and the first slot address listed in the freelist is used, as shown in Fig.~\ref{fig:freeguard_allocation}.
+Also, on every allocation, there is a small randomized chance that a new bag will be created instead of using an existing one.
+The first-in, first-out (FIFO) nature of the freelists removes the need for a delayed array (like the OpenBSD allocator uses) to perform delayed reuse.
+
+FreeGuard's allocation approach works well at improving performance over the OpenBSD allocator.
+However, FreeGuard's only randomization in bag placement is in its random selection between one-of-four freelists.
+This means that FreeGuard has only two \emph{bits of entropy}, meaning that each allocation is randomly selected between $2^2$ locations.
+In comparison, since the OpenBSD allocator randomly selects between all the free slots in a bag, it has $\log_2{N}$ bits of entropy, where $N$ is the number of free slots in a bag.
+This obviously varies, but it results in between three and ten bits of entropy for the OpenBSD allocator, making it more secure in its randomized allocation than FreeGuard.
+
+\subsubsection{Handling Large Allocations in FreeGuard}
+FreeGuard also uses \verb|mmap| for large allocations, like the OpenBSD allocator.
+Objects larger than 1 MB are considered to be ``large objects'' by FreeGuard, whereas the OpenBSD allocator uses 2 KB as its threshold.
+As a result, FreeGuard does not use \verb|mmap| for allocations nearly as often, so it does not include a large object cache like OpenBSD's allocator does.
+This eliminates the use-after-free problem introduced by OpenBSD's large object cache.
+
+\subsubsection{FreeGuard's Canaries and Guard Pages}
+FreeGuard also uses canaries and guard pages to attempt to catch buffer overflows.
+FreeGuard's canaries are 1 byte static values, similar to OpenBSD's canaries.
+However, on deallocation, FreeGuard checks not only the current object's canary, but also the canaries of two neighboring objects in each direction.
+This makes it more likely that buffer overflows are caught earlier, before they can cause harm.
+
+The rate of guard page placement is configurable, and FreeGuard will randomly place the guard pages in the newly-created bags on initialization.
+This configurability allows developers to choose a balance between better protection against buffer overflows and faster bag initialization times.
+
+FreeGuard's different approach compared to the OpenBSD allocator gives it much better performance.
+In a comparison of allocators using a variety of commonly-used programs written in C++, FreeGuard on average had a 1\% performance overhead over the glibc allocator, which is a remarkable improvement over the OpenBSD allocator's 31\% overhead \cite{guarder}.
+However, as mentioned, the reduced randomization entropy compared to OpenBSD's allocator gives up some of the security benefits.
+
+\subsubsection{Tunable Allocation}
+
+When the team that made FreeGuard set out to make its successor, they chose \emph{tunability} as one of its key principles.
+The \emph{tunability} of an allocator is its ability to be reconfigured and adjusted to match the specific needs of an application.
+
+Guarder is FreeGuard's successor, and by default it offers slightly worse performance compared to FreeGuard, but with better randomization entropy and several other security improvements.
+Guarder's design makes it so developers can configure most of its features, allowing you to, set the bits of entropy for allocations, the ratio of guard pages to regular pages, and the \emph{over-provisioning} factor.
+
+\subsubsection{Over-Provisioning in Guarder}
+Over-provisioning is a feature not present in the OpenBSD or FreeGuard allocators that helps Guarder mitigate overflow-based attacks.
+Like guard pages, over-provisioning inserts space between allocated objects, to reduce the likelihood that overflows will read or write to in-use locations.
+Over-provisioning does not rely on system calls to block out pages of memory; instead, over-provisioning happens by preventing object locations within a bag from ever getting allocated.
+This means that there is much less performance overhead of creating over-provisioned memory compared to guard pages, but it comes at the cost of taking up physical memory.
+Also, without OS-level read/write protections, over-provisioning cannot help with the detection of overflows (accessing over-provisioned objects does not trigger a segfault), but it does make it less likely for overflows to affect a program.
+
+Guarder uses both guard pages and over-provisioning to mitigate these attacks, because both approaches have trade-offs, and some combination of both produces a balance of safety and minimizing performance overhead and memory usage.
+Because of Guarder's configurability, developers can adjust the rate that each feature will be used, or disable one or both features, based on the individual application's needs.
+Applications with higher security needs or which execute third-party code might be able to accept a higher memory overhead or performance overhead to better protect against vulnerabilities.
+Performance-oriented applications in less security-sensitive contexts might choose a lower guard page ratio or less over-provisioning to improve performance.
+
+\subsubsection{Guarder's Allocation Strategy}
+
+Guarder's tunable allocation randomization is implemented by changing the approach to keeping track of allocations and deallocations.
+
+\begin{figure}
+	\def\svgwidth{3.5in}
+	\input{guarder_allocation.pdf_tex}
+	\caption{
+		Guarder's allocation strategy.
+		When memory is allocated, a random memory address stored in the allocation buffer is returned.
+		Then, the oldest address in the deallocation buffer replaces the returned item in the allocation buffer.
+		\label{fig:guarder_allocation}}
+\end{figure}
+
+Instead of using freelists or bitmaps, Guarder uses an \emph{allocation buffer} and a \emph{deallocation buffer} to keep track of memory locations in a bag as they are allocated and deallocated.
+The allocation buffer works like a freelist, except that its entries are not in order of use.
+The deallocation buffer is a circular FIFO queue of objects which have been deallocated (similar to the delayed array in the OpenBSD allocator).
+This provides a guaranteed minimum number of allocations that must occur before a deallocated object may be reused, minimizing the effects of use-after-free bugs.
+During an allocation, a random entry from the allocation buffer is chosen and returned.
+The least recently deallocated object from the deallocation buffer is used to replace the entry in the allocation buffer, as shown in Fig.~\ref{fig:guarder_allocation}.
+
+Guarder keeps each allocation buffer at least half-full, providing a guaranteed minimum level of entropy.
+This is in contrast to the OpenBSD allocator, which has an unstable randomization entropy which changes as bags become more full.
+Guarder's configurable randomization entropy works by changing the size of the allocation buffer.
+
+By increasing the randomization entropy and by using over-provisioning, Guarder makes significant improvements in security compared to other secure allocators.
+Its performance is also very good, when using its default settings it had a 3\% average overhead compared to the glibc allocator \cite{guarder}.
+Because of its tunability, by adjusting its parameters, Guarder's performance can be further improved (at the cost of some protection).
+
+With the security and performance aspects of Guarder both being very good, the team was also able to improve memory overhead compared to FreeGuard.
+Unlike FreeGuard, Guarder does not allocate bags for every size class upon initialization.
+Instead, bags are lazily initialized: they are only created when a given size class is first used, reducing unused memory.
+
+While Guarder's focus was on performance, security, and tunability, other researchers began to explore more ways to improve memory overhead, which had largely not been prioritized by existing secure allocators.
 
 \subsection{Memory Overhead Improvements for Secure Allocators: SlimGuard}
-{\color{red}...}
 
-\section{Comparison of Allocator Features, Security, and Approaches}
- {\color{red}...}
+SlimGuard is a secure allocator that takes a very similar approach as Guarder while making significant improvements in memory overhead.
+
+\subsubsection{Size Classes and Memory Layout}
+One significant cause of excessive memory usage in BIBOP-style allocators is when objects are allocated to size classes that are much larger than the objects themselves.
+This happens because of the non-granularity of the size classes.
+In allocators which use canaries, the extra byte reserved for the canary often causes an object to not fit in a size class it would otherwise fit.
+For example, a 64 byte allocation request would become 65 bytes including the canary, making it not fit in the 64 bit size class, and it would use the 128 byte size class instead.
+This is a common occurrence because allocation requests are often in powers-of-two numbers of bytes, as are the size classes of most BIBOP allocators.
+
+To combat this, SlimGuard uses much more fine-grained size classes: it offers 176 size classes, making it much more likely that objects will fit well in their given size class \cite{slimguard}.
+
+Also, SlimGuard does not use fixed-size bags containing a certain number of objects of a given size class.
+Each initialized size class instead corresponds to a segment of memory which can expand or shrink as needed, holding a varying number of objects of a given size class.
+This allows no-longer-used memory to be released back to the operating system, which FreeGuard does not do and Guarder only does for very large size classes \cite{guarder} \cite{slimguard}.
+
+\subsubsection{Allocation Strategy}
+
+\begin{figure}
+	\def\svgwidth{3.5in}
+	\input{slimguard_allocation.pdf_tex}
+	\caption{
+		SlimGuard's allocation strategy.
+		During allocation, a random address stored in the allocation buffer is returned.
+		During deallocation, the deallocated address is stored in the next free position in the allocation buffer.
+		\label{fig:slimguard_allocation}}
+\end{figure}
+
+
+SlimGuard's allocation strategy is similar to Guarder's, where an allocation buffer holds pointers to free objects, and a random pointer in that buffer is returned.
+SlimGuard does not use a deallocation buffer, instead it places deallocated objects directly into open spots in the allocation buffer, as shown in Fig.~\ref{fig:slimguard_allocation}.
+There is a performance overhead to this approach because it has to search through the allocation buffer to find an unused space \cite{guarder}.
+
+\subsubsection{Dynamic Canaries}
+SlimGuard uses guard pages, over-provisioning, and canaries, but SlimGuard changes the implementation of canaries slightly, introducing \emph{dynamic canaries}.
+Dynamic canaries hold different values based on the hash of the memory pointer.
+In other allocators, \emph{static canaries} hold a single value that is the same for every canary in the program.
+Attackers can leak the value of the canary using a buffer over-read, and later strategically place the canary value in a buffer overflow for another object, to prevent the canary checker from detecting the overflow.
+SlimGuard's dynamic canaries make each object have its own canary value, making it much harder for attackers to get around buffer overflow detections via canaries.
+
+SlimGuard's memory usage and performance are generally on par with glibc's.
+In most macro-benchmarks, SlimGuard's memory usage was within 10\% of glibc's, and in the worst case, SlimGuard's memory usage overhead was less than 50\% compared to glibc.
+In the same worst-case benchmark, Guarder's memory usage was 5x that of glibc's, because of an edge case where Guarder was not able to reuse memory, as well as the limitations of Guarder's size classes.
 
 \section{Conclusion}
- {\color{red}...}
+
+As we have seen, a wide variety of techniques have been introduced to minimize the effectiveness of heap-based attacks, while avoiding making sacrifices in allocation/deallocation performance and memory usage.
+
+In order to reduce the predictability of memory layout, secure allocators randomize allocation locations.
+By separating metadata from data, allocators can prevent invalid free and double-free attacks.
+To catch and mitigate the effectiveness of buffer overflow attacks, allocators use guard pages, canaries, and over-provisioning.
+Delayed reuse allows allocators to reduce use-after-free attacks.
+
+The allocators we've looked at implement these strategies in different ways to improve security while attempting to maintain performance and limit memory overhead.
+By testing with and switching to secure allocators like these, we can prevent vulnerabilities like Heartbleed \cite{guarder}, and catch other undiscovered bugs that may leave open the potential for vulnerabilities in the future.
+
+In future work, it would be worthwhile to test widely-used C and C++ libraries and programs with these secure allocators to find heap-related bugs, and to test the viability of these allocators in production code.
+
+\section*{Acknowledgements}
+
+Thanks to Pete Tucker for his help and encouragement throughout this research.
 
 \printbibliography
 
